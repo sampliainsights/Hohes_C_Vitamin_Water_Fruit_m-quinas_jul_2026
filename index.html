@@ -2084,6 +2084,18 @@
       padding: 12px 0
     }
 
+    .branch-note {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      min-height: 120px;
+      height: 100%;
+      line-height: 1.5;
+      padding: 16px
+    }
+
     /* === FLOW / SANKEY diagram === */
     .flow-lbl {
       font-size: 9.5px;
@@ -2902,6 +2914,12 @@
               <option value="">Todos</option>
             </select>
           </div>
+          <div style="margin-top:8px;">
+            <div class="filter-group-label" style="font-size:10px;margin-bottom:4px;">Intención de compra</div>
+            <select class="filter-select" id="fIntent" style="width:100%;border-radius:var(--r-sm);">
+              <option value="">Todas</option>
+            </select>
+          </div>
           <div style="margin-top:10px;font-size:10px;color:var(--txt-3);" id="sidebarFilterCount"></div>
         </div>
 
@@ -3381,12 +3399,14 @@
       {
         col: 'URa2sVfQWoQKFmUPwLUM', title: 'Sustitución de bebidas actuales',
         sub: '¿Sustituirás las bebidas o refrescos que hoy consumes por Hohes C Vitamin Water?',
-        type: 'bar', section: 'intencion', pairStart: true, blueGradient: true
+        type: 'bar', section: 'intencion', pairStart: true, blueGradient: true,
+        intentBranch: true  // solo la preguntan a 'Compradores potenciales'
       },
       {
         col: 'LTi3r8D6AbfdjXIERntd', title: 'Motivo de duda o no compra',
         sub: '¿Cuál es el motivo principal por el que dudarías o no comprarías este producto?',
-        type: 'hbar', section: 'intencion', pairEnd: true, redGradient: true, tallBars: true
+        type: 'hbar', section: 'intencion', pairEnd: true, redGradient: true, tallBars: true,
+        intentBranch: true  // solo la preguntan a 'Indecisos' y 'No compradores'
       },
       {
         col: 'ZWIXfoMGaJlzLRkKBv9o', title: '¿Lo recomendarías?',
@@ -3428,6 +3448,25 @@
     }
     function blueShades(n) { const sR = 15, sG = 23, sB = 41, eR = 91, eG = 121, eB = 184; return Array.from({ length: n }, (_, i) => { const t = n > 1 ? i / (n - 1) : 0; return `rgb(${Math.round(sR + (eR - sR) * t)},${Math.round(sG + (eG - sG) * t)},${Math.round(sB + (eB - sB) * t)})`; }); }
     function destroyChart(id) { if (charts[id]) { charts[id].destroy(); delete charts[id]; } }
+
+    // ── BRANCH PLACEHOLDER (non-destructive): hide the canvas + show a note, or restore it ──
+    // Used for questions only asked to certain intent segments; keeps the canvas alive so the
+    // chart reappears when the intent filter is cleared.
+    function setBranchPlaceholder(chartId, msg) {
+      const canvas = document.getElementById(chartId);
+      if (!canvas || !canvas.parentElement) return;
+      const wrap = canvas.parentElement;
+      let note = wrap.querySelector('.branch-note');
+      if (msg) {
+        destroyChart(chartId);
+        canvas.style.display = 'none';
+        if (!note) { note = document.createElement('div'); note.className = 'no-data branch-note'; wrap.appendChild(note); }
+        note.innerHTML = msg;
+      } else {
+        if (note) note.remove();
+        canvas.style.display = '';
+      }
+    }
     function pct(n, t) { return t > 0 ? Math.round(n / t * 100) : 0; }
     function norm(s) { return (s || '').toString().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim(); }
     function getColData(rows, idx) { const out = []; if (idx < 0) return out; rows.forEach(r => { const v = (r[idx] || '').toString().trim(); if (v) out.push(v); }); return out; }
@@ -4570,6 +4609,20 @@
         if (q.hidden) return;
         const idx = getIdxAny(q.col, q.colFallback);
         const chartId = 'dynChart_' + i;
+        // ── Branch questions: only asked to certain intent segments. If the intent filter
+        //    selects a segment that never saw this question, show a friendly note instead
+        //    of an empty/broken chart (and restore the canvas otherwise). ──
+        if (q.intentBranch) {
+          const fEl = document.getElementById('fIntent');
+          const sel = fEl ? fEl.value : '';
+          const hasData = idx >= 0 && rows.some(r => (r[idx] || '').toString().trim());
+          if (sel && !hasData) {
+            const selSafe = sel.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            setBranchPlaceholder(chartId, 'Esta pregunta no aplica al segmento «<strong>' + selSafe + '</strong>».<br><span style="opacity:.7;font-size:11px;">Solo se preguntó a otros perfiles de intención de compra.</span>');
+            return;
+          }
+          setBranchPlaceholder(chartId, null);
+        }
         if (q.type === 'consumo_selector') {
           window.consumoChartData = window.consumoChartData || {};
           window.consumoChartData[chartId] = q.products.map(p => {
@@ -5038,6 +5091,7 @@
         if (n === 'user_gender' || n === 'genero' || n.includes('gender') || n.includes('genero')) COL['_gender'] = i;
         if (n === 'user_age' || n === 'edad' || n === 'age' || n.includes('user_age')) COL['_age'] = i;
         if (h === 'Pc5hLaGFOHTvs3BouyM9' || n.includes('que variedad de vitamin water') || n.includes('variedad')) COL['_sabor'] = i;
+        if (h === 'plUyN6AqbUDqdF70gaVs' || n.includes('probabilidad de compra') || n.includes('intencion de compra')) COL['_intent'] = i;
       });
     }
 
@@ -5054,6 +5108,23 @@
       allRows.forEach(r => { const v = (r[sIdx] || '').toString().trim(); if (v) set.add(v); });
       const opts = Array.from(set).sort((a, b) => a.localeCompare(b, 'es'));
       sel.innerHTML = '<option value="">Todos</option>' + opts.map(o => `<option value="${o.replace(/"/g, '&quot;')}">${o}</option>`).join('');
+    }
+
+    // ── POPULATE INTENCIÓN DE COMPRA FILTER (columna 'plUyN6AqbUDqdF70gaVs') ──
+    function populateIntentFilter() {
+      const sel = document.getElementById('fIntent');
+      if (!sel) return;
+      const iIdx = COL['_intent'] !== undefined ? COL['_intent'] : -1;
+      if (iIdx < 0) { if (sel.parentElement) sel.parentElement.style.display = 'none'; return; }
+      const set = new Set();
+      allRows.forEach(r => { const v = (r[iIdx] || '').toString().trim(); if (v) set.add(v); });
+      const order = ['Compradores potenciales', 'Compradores Potenciales', 'Comprador potencial', 'Indecisos', 'Indeciso', 'No compradores', 'No comprador'];
+      const opts = Array.from(set).sort((a, b) => {
+        const ia = order.findIndex(o => norm(o) === norm(a)), ib = order.findIndex(o => norm(o) === norm(b));
+        if (ia !== -1 || ib !== -1) return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+        return a.localeCompare(b, 'es');
+      });
+      sel.innerHTML = '<option value="">Todas</option>' + opts.map(o => `<option value="${o.replace(/"/g, '&quot;')}">${o}</option>`).join('');
     }
 
     // ── POPULATE CATEGORÍA FILTER (no-op en esta campaña; elemento fCategoria ausente) ──
@@ -5078,13 +5149,16 @@
       const g = document.getElementById('fGender').value;
       const a = document.getElementById('fAge').value;
       const sb = document.getElementById('fSabor') ? document.getElementById('fSabor').value : '';
+      const it = document.getElementById('fIntent') ? document.getElementById('fIntent').value : '';
       const cat = document.getElementById('fCategoria') ? document.getElementById('fCategoria').value : '';
       const gIdx = COL['_gender'] !== undefined ? COL['_gender'] : -1;
       const aIdx = COL['_age'] !== undefined ? COL['_age'] : -1;
       const sIdx = COL['_sabor'] !== undefined ? COL['_sabor'] : -1;
+      const iIdx = COL['_intent'] !== undefined ? COL['_intent'] : -1;
       const cIdx = COL['_categoria'] !== undefined ? COL['_categoria'] : -1;
       return allRows.filter(r => {
         if (cat && cIdx >= 0) { if ((r[cIdx] || '').toString().trim() !== cat) return false; }
+        if (it && iIdx >= 0) { if ((r[iIdx] || '').toString().trim() !== it) return false; }
         if (sb && sIdx >= 0) { if ((r[sIdx] || '').toString().trim() !== sb) return false; }
         if (g && gIdx >= 0) { const v = norm((r[gIdx] || '').toString()); const isF = v.startsWith('f') || v === 'mujer' || v === 'femenino'; const isM = v.startsWith('m') || v === 'hombre' || v === 'masculino'; if (g === 'F' && !isF) return false; if (g === 'M' && !isM) return false; }
         if (a && aIdx >= 0) { const ag = ageGroup((r[aIdx] || '').toString()); if (!ag || ag !== a) return false; }
@@ -5168,6 +5242,7 @@
         detectColumns(allHeaders);
         allRows = merged;
         populateSaborFilter();
+        populateIntentFilter();
         populateCategoriaFilter();
         buildDynamicCharts();
         render(getFiltered());
@@ -5184,7 +5259,7 @@
     }
 
     // ── EVENTS ──
-    ['fGender', 'fAge', 'fSabor', 'fCategoria'].forEach(id => {
+    ['fGender', 'fAge', 'fSabor', 'fIntent', 'fCategoria'].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.addEventListener('change', () => render(getFiltered()));
     });
